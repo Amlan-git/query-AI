@@ -1,0 +1,32 @@
+{
+  "name": "backend",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/cors": "^2.8.19"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@ai-sdk/deepseek": "^2.0.35",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@supabase/supabase-js": "^2.106.1",
+    "@tavily/core": "^0.7.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.8.0",
+    "ai": "^6.0.184",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "tsx": "^4.22.1"
+  },
+  "scripts": {
+    "migrate": "bun --bun x prisma migrate dev",
+    "generate": "bun --bun x prisma generate"
+  }
+}
