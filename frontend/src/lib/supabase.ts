@@ -52,7 +52,7 @@ function createSupabaseClientSingleton(): Promise<SupabaseClient> {
                     detectSessionInUrl: false,
                     persistSession: true,
                     storage: window.localStorage,
-                    storageKey: "quest-auth",
+                    storageKey: "query-auth",
                 },
             });
         });

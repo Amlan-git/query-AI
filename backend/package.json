@@ -11,8 +11,9 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^2.0.35",
+    "@ai-sdk/google": "^3.0.80",
     "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "@supabase/supabase-js": "^2.106.1",
     "@tavily/core": "^0.7.3",
     "@types/express": "^5.0.6",
@@ -23,7 +24,8 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.2.0",
-    "tsx": "^4.22.1"
+    "tsx": "^4.22.1",
+    "zod": "^4.1.13"
   },
   "scripts": {
     "migrate": "bun --bun x prisma migrate dev",

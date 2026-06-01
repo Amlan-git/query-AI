@@ -3,7 +3,7 @@ const http = require('http');
 const req = http.request({
   hostname: 'localhost',
   port: 3000,
-  path: '/quest_ask',
+  path: '/query_ask',
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',

@@ -1,28 +1,22 @@
-import { useState } from "react";
-import { Copy, Check, Terminal, FileText, ChevronRight } from "lucide-react";
+import { Copy, Terminal, ChevronRight, Hash } from "lucide-react";
+
+type Source = {
+  url: string;
+  title: string;
+  snippet?: string;
+};
 
 type Props = {
   answer: string;
   isStreaming: boolean;
+  sources: Source[];
 };
 
-export default function AnswerStream({ answer, isStreaming }: Props) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(answer);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy text: ", err);
-    }
-  };
-
-  // 1. Inline parser for styling bold (**), italic (*), and inline code (`)
+export default function AnswerStream({ answer, isStreaming, sources }: Props) {
+  // 1. Inline parser for styling links, citations, bold, italic, and inline code.
   const parseInlineStyles = (text: string): React.ReactNode[] => {
     const parts: React.ReactNode[] = [];
-    const regex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+    const regex = /(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*\n]+)\*|(?<!\!)\[(\d+)\])/g;
     const matches = [...text.matchAll(regex)];
 
     if (matches.length === 0) {
@@ -40,24 +34,66 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
       }
 
       // Add styled token
-      if (matchedText.startsWith("**") && matchedText.endsWith("**")) {
+      if (match[2] && match[3]) {
         parts.push(
-          <strong key={i} className="font-bold text-foreground bg-gradient-to-r from-foreground to-foreground/90 bg-clip-text">
-            {matchedText.slice(2, -2)}
-          </strong>
+          <a
+            key={i}
+            href={match[3]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-3 decoration-primary/45 hover:decoration-primary transition-colors"
+          >
+            {match[2]}
+          </a>
         );
-      } else if (matchedText.startsWith("*") && matchedText.endsWith("*")) {
-        parts.push(
-          <em key={i} className="italic text-foreground/80 font-medium">
-            {matchedText.slice(1, -1)}
-          </em>
-        );
-      } else if (matchedText.startsWith("`") && matchedText.endsWith("`")) {
+      } else if (match[4]) {
         parts.push(
           <code key={i} className="px-1.5 py-0.5 rounded-md bg-muted/40 border border-border/40 font-mono text-xs text-primary font-semibold">
-            {matchedText.slice(1, -1)}
+            {match[4]}
           </code>
         );
+      } else if (match[5]) {
+        parts.push(
+          <strong key={i} className="font-bold text-foreground bg-gradient-to-r from-foreground to-foreground/90 bg-clip-text">
+            {match[5]}
+          </strong>
+        );
+      } else if (match[6]) {
+        parts.push(
+          <em key={i} className="italic text-foreground/80 font-medium">
+            {match[6]}
+          </em>
+        );
+      } else if (match[7]) {
+        const citationNumber = Number(match[7]);
+        const source = Number.isFinite(citationNumber) ? sources[citationNumber - 1] : undefined;
+        const citationClassName = "mx-0.5 inline-flex translate-y-[-1px] items-center gap-0.5 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary transition-colors hover:border-primary/35 hover:bg-primary/15";
+
+        if (source?.url) {
+          parts.push(
+            <a
+              key={i}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={source.title || source.url}
+              className={citationClassName}
+            >
+              <Hash className="size-2.5" />
+              {match[7]}
+            </a>
+          );
+        } else {
+        parts.push(
+          <span
+            key={i}
+            className={citationClassName}
+          >
+            <Hash className="size-2.5" />
+            {match[7]}
+          </span>
+        );
+        }
       }
 
       lastIndex = start + matchedText.length;
@@ -70,7 +106,18 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
     return parts;
   };
 
-  // 2. Block-level parser for Code Blocks, Lists, Blockquotes, Headers, and Paragraphs
+  const isTableDivider = (line: string) =>
+    /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+
+  const parseTableRow = (line: string) =>
+    line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+  // 2. Block-level parser for Code Blocks, Lists, Tables, Blockquotes, Headers, and Paragraphs.
   const renderMarkdownBlocks = (markdown: string): React.ReactNode[] => {
     const lines = markdown.split("\n");
     const blocks: React.ReactNode[] = [];
@@ -81,16 +128,34 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
     
     let inList = false;
     let listItems: React.ReactNode[] = [];
+    let listType: "ul" | "ol" = "ul";
+    let paragraphLines: string[] = [];
+
+    const flushParagraph = (key: number) => {
+      if (paragraphLines.length === 0) return;
+
+      blocks.push(
+        <p key={`p-${key}`} className="my-3.5 break-words text-[17px] font-light leading-8 text-foreground/88">
+          {parseInlineStyles(paragraphLines.join(" "))}
+        </p>
+      );
+      paragraphLines = [];
+    };
 
     const flushList = (key: number) => {
       if (listItems.length > 0) {
+        const ListTag = listType;
         blocks.push(
-          <ul key={`list-${key}`} className="list-none space-y-2.5 my-4 pl-1">
+          <ListTag
+            key={`list-${key}`}
+            className={`${listType === "ol" ? "list-decimal pl-6" : "list-none pl-1"} space-y-2.5 my-4`}
+          >
             {listItems}
-          </ul>
+          </ListTag>
         );
         listItems = [];
         inList = false;
+        listType = "ul";
       }
     };
 
@@ -128,6 +193,7 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
           inCodeBlock = false;
         } else {
           // Opening code block
+          flushParagraph(i);
           flushList(i);
           inCodeBlock = true;
           codeLanguage = line.trim().slice(3).trim();
@@ -140,11 +206,68 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
         continue;
       }
 
+      // B. Table Handling
+      if (
+        i + 1 < lines.length &&
+        line.includes("|") &&
+        isTableDivider(lines[i + 1] || "")
+      ) {
+        flushParagraph(i);
+        flushList(i);
+
+        const headers = parseTableRow(line);
+        const rows: string[][] = [];
+        i += 2;
+
+        while (i < lines.length && (lines[i] || "").includes("|") && (lines[i] || "").trim() !== "") {
+          rows.push(parseTableRow(lines[i] || ""));
+          i++;
+        }
+        i--;
+
+        blocks.push(
+          <div key={`table-${i}`} className="my-5 overflow-x-auto rounded-xl border border-border/70 bg-card/25">
+            <table className="w-full min-w-[520px] border-collapse text-left text-sm">
+              <thead className="bg-card/60 text-foreground">
+                <tr>
+                  {headers.map((header, index) => (
+                    <th key={index} className="border-b border-border/70 px-4 py-3 font-bold">
+                      {parseInlineStyles(header)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rowIndex) => (
+                  <tr key={rowIndex} className="border-b border-border/35 last:border-0">
+                    {headers.map((_, cellIndex) => (
+                      <td key={cellIndex} className="px-4 py-3 align-top text-foreground/85">
+                        {parseInlineStyles(row[cellIndex] || "")}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+
+      // C. Horizontal Rule Handling
+      if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) {
+        flushParagraph(i);
+        flushList(i);
+        blocks.push(<hr key={`hr-${i}`} className="my-6 border-border/40" />);
+        continue;
+      }
+
       // B. Header Handling
       if (line.startsWith("### ")) {
+        flushParagraph(i);
         flushList(i);
         blocks.push(
-          <h3 key={i} className="text-base md:text-lg font-bold text-foreground tracking-tight mt-6 mb-3 leading-snug flex items-center gap-1.5">
+          <h3 key={i} className="mt-6 mb-3 flex items-center gap-1.5 text-[18px] font-medium leading-snug text-foreground/92">
             {parseInlineStyles(line.slice(4))}
           </h3>
         );
@@ -152,9 +275,10 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
       }
 
       if (line.startsWith("## ")) {
+        flushParagraph(i);
         flushList(i);
         blocks.push(
-          <h2 key={i} className="text-lg md:text-xl font-extrabold text-foreground tracking-tight mt-8 mb-4 leading-snug border-b border-border/10 pb-1.5">
+          <h2 key={i} className="mt-8 mb-4 border-b border-border/10 pb-1.5 text-[20px] font-medium leading-snug text-foreground/94">
             {parseInlineStyles(line.slice(3))}
           </h2>
         );
@@ -162,9 +286,10 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
       }
 
       if (line.startsWith("# ")) {
+        flushParagraph(i);
         flushList(i);
         blocks.push(
-          <h1 key={i} className="text-xl md:text-2xl font-black text-foreground tracking-tight mt-9 mb-4 leading-normal">
+          <h1 key={i} className="mt-9 mb-4 text-[22px] font-semibold leading-normal text-foreground">
             {parseInlineStyles(line.slice(2))}
           </h1>
         );
@@ -173,6 +298,7 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
 
       // C. Blockquote Handling
       if (line.startsWith("> ")) {
+        flushParagraph(i);
         flushList(i);
         blocks.push(
           <blockquote key={i} className="pl-4 border-l-3 border-primary/60 bg-primary/5 py-2 px-3 rounded-r-lg my-4 text-sm text-foreground/85 leading-relaxed font-light italic">
@@ -183,13 +309,21 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
       }
 
       // D. Bullet List Handling
-      const listMatch = line.match(/^(\s*)([-*+])\s+(.*)/);
+      const unorderedListMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
+      const orderedListMatch = line.match(/^(\s*)\d+[.)]\s+(.*)/);
+      const listMatch = unorderedListMatch || orderedListMatch;
       if (listMatch) {
+        flushParagraph(i);
         inList = true;
-        const content = listMatch[3];
+        const nextListType = orderedListMatch ? "ol" : "ul";
+        if (listItems.length > 0 && listType !== nextListType) {
+          flushList(i);
+        }
+        listType = nextListType;
+        const content = listMatch[2] || "";
         listItems.push(
-          <li key={`li-${i}`} className="flex items-start gap-2.5 text-foreground/90 text-sm md:text-base leading-relaxed pl-1">
-            <ChevronRight className="size-4 text-primary shrink-0 mt-1 select-none" />
+          <li key={`li-${i}`} className={`${listType === "ul" ? "flex gap-3 pl-1" : "pl-1"} text-[17px] font-light leading-8 text-foreground/88`}>
+            {listType === "ul" && <ChevronRight className="size-4 text-primary shrink-0 mt-1 select-none" />}
             <span className="flex-1">{parseInlineStyles(content)}</span>
           </li>
         );
@@ -203,55 +337,40 @@ export default function AnswerStream({ answer, isStreaming }: Props) {
 
       // E. Blank Lines
       if (line.trim() === "") {
+        flushParagraph(i);
         continue;
       }
 
       // F. Standard Paragraph Handling
-      blocks.push(
-        <p key={i} className="text-foreground/90 text-sm md:text-base leading-relaxed tracking-wide my-3.5 font-sans break-words font-light">
-          {parseInlineStyles(line)}
-        </p>
-      );
+      paragraphLines.push(line.trim());
     }
 
     // Flush any trailing lists
+    flushParagraph(lines.length);
     flushList(lines.length);
+
+    // During streaming, render an unfinished fenced block instead of dropping it.
+    if (inCodeBlock && codeContent.length > 0) {
+      const fullCode = codeContent.join("\n");
+      blocks.push(
+        <div key="code-streaming" className="my-5 overflow-hidden rounded-xl border border-border/80 bg-card/35 backdrop-blur-md shadow-xs">
+          <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border/70 bg-card/50 text-[10px] font-mono text-muted-foreground/80 select-none">
+            <Terminal className="size-3.5 text-primary/75" />
+            <span>{(codeLanguage || "code").toUpperCase()}</span>
+          </div>
+          <pre className="p-4 overflow-x-auto font-mono text-xs text-foreground/90 leading-relaxed bg-black/10">
+            <code>{fullCode}</code>
+          </pre>
+        </div>
+      );
+    }
 
     return blocks;
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto flex flex-col gap-6 py-6 px-1 animate-fade-in group">
-      
-      {/* 1. Header Metadata Section (Appears after answer completes) */}
-      {!isStreaming && answer && (
-        <div className="flex items-center justify-between pb-3.5 border-b border-border/30 select-none">
-          <div className="flex items-center gap-2">
-            <FileText className="size-4.5 text-primary/80 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-foreground/90 bg-clip-text">
-              Answer Analysis
-            </span>
-          </div>
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card/25 hover:bg-card/75 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-all duration-200 cursor-pointer shadow-xs"
-          >
-            {copied ? (
-              <>
-                <Check className="size-3 text-emerald-500 animate-bounce" />
-                <span className="text-emerald-500">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="size-3" />
-                <span>Copy Answer</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* 2. Structured Markdown Output Rendering */}
+    <div className="w-full animate-fade-in px-0.5 pb-6">
+      {/* Structured Markdown Output Rendering */}
       <div className="relative">
         <div className="space-y-1">
           {renderMarkdownBlocks(answer)}

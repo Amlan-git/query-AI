@@ -1,12 +1,15 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 const GoogleIcon = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 24 24" className={props.className} fill="currentColor">
-    <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.53 0-6.4-2.87-6.4-6.4s2.87-6.4 6.4-6.4c1.558 0 2.977.56 4.088 1.486L21.12 4.3C18.913 2.248 15.82 1 12.24 1 6.032 1 1 6.032 1 12.24s5.032 11.24 11.24 11.24c5.897 0 10.74-4.254 10.74-11.24 0-.768-.073-1.507-.197-2.21H12.24z" />
+  <svg viewBox="0 0 24 24" className={props.className} aria-hidden="true">
+    <path fill="#4285F4" d="M21.6 12.23c0-.82-.07-1.42-.22-2.05H12v3.72h5.51c-.11.93-.71 2.32-2.05 3.26l-.02.13 2.98 2.31.2.02c1.84-1.7 2.98-4.2 2.98-7.39Z" />
+    <path fill="#34A853" d="M12 22c2.63 0 4.84-.87 6.45-2.37l-3.07-2.38c-.82.57-1.92.97-3.38.97-2.57 0-4.75-1.7-5.53-4.04l-.12.01-3.1 2.4-.04.11A9.99 9.99 0 0 0 12 22Z" />
+    <path fill="#FBBC05" d="M6.47 14.18A6.17 6.17 0 0 1 6.14 12c0-.76.12-1.49.32-2.18l-.01-.13-3.14-2.44-.1.05A9.99 9.99 0 0 0 2.14 12c0 1.61.39 3.13 1.07 4.47l3.26-2.29Z" />
+    <path fill="#EA4335" d="M12 5.78c1.83 0 3.07.79 3.77 1.45l2.75-2.69C16.84 2.98 14.63 2 12 2a9.99 9.99 0 0 0-8.79 5.3l3.25 2.52C7.25 7.48 9.43 5.78 12 5.78Z" />
   </svg>
 );
 
@@ -18,13 +21,20 @@ const GithubIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 export default function Auth() {
   const [loading, setLoading] = useState(false);
+  const [searchParams] = useSearchParams();
+  const prompt = searchParams.get("prompt") || "";
 
   async function login(provider: "github" | "google") {
     setLoading(true);
+    const callbackUrl = new URL(`${window.location.origin}/auth/callback`);
+    if (prompt) {
+      callbackUrl.searchParams.set("prompt", prompt);
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`
+        redirectTo: callbackUrl.toString()
       }
     });
 
@@ -35,48 +45,48 @@ export default function Auth() {
   }
 
   return (
-    <div className="container mx-auto max-w-md p-6 relative z-10 flex min-h-[80vh] items-center justify-center">
-      <Card className="w-full bg-gradient-to-b from-card/85 to-card border shadow-xl backdrop-blur-md transition-all duration-300">
-        <CardHeader className="text-center py-8 gap-2">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary mb-2">
-            <Shield className="size-7" />
-          </div>
-          <CardTitle className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
-            Quest Login
-          </CardTitle>
-          <CardDescription className="max-w-xs mx-auto">
-            Choose your preferred sign-in provider to continue your research session.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 pb-6">
+    <main className="flex min-h-screen items-center justify-center bg-[#070806] px-6 py-10 text-[#f4f1eb]">
+      <section className="flex w-full max-w-[560px] flex-col items-center text-center">
+        <div className="mb-9 inline-flex items-center gap-3 rounded-full border border-[#5be1df]/45 bg-[#5be1df]/10 px-4 py-2 text-sm font-medium text-[#72edeb] shadow-[0_0_30px_rgba(91,225,223,0.08)]">
+          <span className="size-2 rounded-full bg-[#5be1df]" />
+          Sign in to continue
+        </div>
+
+        <h1 className="max-w-[520px] font-serif text-[42px] font-semibold leading-[1.03] tracking-[-0.03em] text-[#faf7f1] md:text-[52px]">
+          Answers you can <em className="font-serif italic text-[#5be1df]">trust</em>
+          <br />
+          are one sign-in away.
+        </h1>
+
+        <div className="mt-11 flex w-full max-w-[426px] flex-col gap-4">
           <Button
             onClick={() => login("google")}
             disabled={loading}
-            className="w-full gap-3 px-6 py-5 text-base font-semibold shadow-md transition-transform hover:scale-102 flex items-center justify-center cursor-pointer"
+            className="h-[60px] w-full gap-4 rounded-xl border border-white/10 bg-[#1d1a15] px-6 text-base font-semibold text-[#f4f1eb] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-colors hover:bg-[#25221c] disabled:opacity-60"
           >
-            <GoogleIcon className="size-5" />
+            <GoogleIcon className="size-6" />
             Continue with Google
           </Button>
 
           <Button
             onClick={() => login("github")}
             disabled={loading}
-            variant="outline"
-            className="w-full gap-3 px-6 py-5 text-base font-semibold border shadow-sm hover:scale-102 flex items-center justify-center cursor-pointer"
+            className="h-[60px] w-full gap-4 rounded-xl border border-white/10 bg-[#1d1a15] px-6 text-base font-semibold text-[#f4f1eb] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-colors hover:bg-[#25221c] disabled:opacity-60"
           >
-            <GithubIcon className="size-5" />
+            <GithubIcon className="size-6 text-white" />
             Continue with GitHub
           </Button>
-        </CardContent>
-        {loading && (
-          <CardFooter className="justify-center flex flex-col gap-2 pb-8">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-            <p className="text-muted-foreground text-xs font-semibold animate-pulse">
-              Redirecting to provider...
-            </p>
-          </CardFooter>
-        )}
-      </Card>
-    </div>
+
+          <div className="mt-4 flex items-center justify-center gap-3 text-[15px] text-[#928d84]">
+            {loading ? (
+              <div className="size-4 animate-spin rounded-full border-2 border-[#5be1df] border-t-transparent" />
+            ) : (
+              <ShieldCheck className="size-4 text-[#5be1df]" />
+            )}
+            <span>{loading ? "Redirecting to provider..." : "No passwords - single sign-on only"}</span>
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }

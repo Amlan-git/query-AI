@@ -48,7 +48,8 @@ export default function AuthCallback() {
       }
 
       // Navigate to the main app
-      navigate("/search");
+      const prompt = new URLSearchParams(window.location.search).get("prompt");
+      navigate(prompt ? `/search?prompt=${encodeURIComponent(prompt)}` : "/search");
     }
 
     async function handleCallback() {

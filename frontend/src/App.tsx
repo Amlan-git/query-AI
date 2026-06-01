@@ -1,18 +1,24 @@
-import { BrowserRouter, Route, Routes, Navigate } from "react-router";
+import { useEffect } from "react";
+import { BrowserRouter, Route, Routes } from "react-router";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import AuthCallback from "./pages/AuthCallback";
+import Home from "./pages/Home";
 import ProtectedRoute from "./components/ProtectedRoute";
 import SearchPage from "./pages/SearchPage";
 import AppLayout from "./components/layout/AppLayout";
 
 export function App() {
+    useEffect(() => {
+        document.documentElement.classList.add("dark");
+    }, []);
+
     return (
         <BrowserRouter>
             <Routes>
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
-                <Route path="/" element={<Navigate to="/search" replace />} />
+                <Route path="/" element={<Home />} />
                 <Route
                     path="/search"
                     element={
@@ -47,4 +53,3 @@ export function App() {
 }
 
 export default App;
-

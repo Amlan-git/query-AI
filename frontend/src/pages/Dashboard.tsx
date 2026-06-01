@@ -29,7 +29,7 @@ export default function Dashboard() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setUser(null);
+    navigate("/");
   };
 
   if (loading) {
@@ -47,7 +47,7 @@ export default function Dashboard() {
     <div className="container mx-auto max-w-4xl p-6 md:p-12 relative z-10">
       <div className="mb-8 flex flex-col gap-2">
         <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
-          Quest Hub
+          Query Hub
         </h1>
         <p className="text-muted-foreground text-base">
           Manage your AI research sessions, databases, and profile settings.

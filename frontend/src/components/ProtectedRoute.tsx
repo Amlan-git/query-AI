@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useLocation } from "react-router";
 import { supabase } from "@/lib/supabase";
 
 export default function ProtectedRoute({ 
@@ -9,6 +9,7 @@ export default function ProtectedRoute({
 }) {
     const [user, setUser] = useState<unknown>(null);
     const [loading, setLoading] = useState(true);
+    const location = useLocation();
 
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => {
@@ -27,7 +28,7 @@ export default function ProtectedRoute({
     }
 
     if (!user) {
-        return <Navigate to="/auth" replace />;
+        return <Navigate to={`/auth${location.search}`} replace />;
     }
 
     return <>{children}</>;

@@ -26,5 +26,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "exclude": [
+    "test*.ts",
+    "test*.js",
+    "test_*.ts",
+    "test_*.js"
+  ]
 }

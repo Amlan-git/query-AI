@@ -1,0 +1,48 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bun run build:frontend",
+  "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/env.json",
+      "destination": "/api/env.json"
+    },
+    {
+      "source": "/signin",
+      "destination": "/api/signin"
+    },
+    {
+      "source": "/signup",
+      "destination": "/api/signup"
+    },
+    {
+      "source": "/query_ask/:path*",
+      "destination": "/api/query_ask/:path*"
+    },
+    {
+      "source": "/query_ask",
+      "destination": "/api/query_ask"
+    },
+    {
+      "source": "/conversations/:path*",
+      "destination": "/api/conversations/:path*"
+    },
+    {
+      "source": "/conversations",
+      "destination": "/api/conversations"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
