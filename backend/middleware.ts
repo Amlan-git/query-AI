@@ -5,6 +5,8 @@ import cors from "cors";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import type { User } from "@supabase/supabase-js";
 import { createSupabaseClient } from "./client";
+import { prisma } from "./db";
+import { AuthProvider } from "./prisma/generated/enums";
 
 // Initialize Supabase Client for JWT verification
 const client = createSupabaseClient();
@@ -97,6 +99,52 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
   return next();
+}
+
+function getUserProfile(user: User) {
+  const rawProvider = user.app_metadata?.provider;
+  const provider = rawProvider === "github" ? AuthProvider.GITHUB : AuthProvider.GOOGLE;
+  const name =
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email ||
+    "User";
+
+  return { name, provider };
+}
+
+export async function ensureAppUser(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return next();
+  }
+
+  if (!req.user.email) {
+    console.warn(`[user-sync] Missing email for authenticated user: ${req.user.id}`);
+    return res.status(400).json({ error: "Authenticated user is missing an email address" });
+  }
+
+  const { name, provider } = getUserProfile(req.user);
+
+  try {
+    await prisma.user.upsert({
+      where: { id: req.user.id },
+      update: {
+        email: req.user.email,
+        name,
+        provider
+      },
+      create: {
+        id: req.user.id,
+        email: req.user.email,
+        name,
+        provider
+      }
+    });
+    return next();
+  } catch (err: unknown) {
+    console.error("[user-sync] Failed to sync authenticated user:", err);
+    return res.status(500).json({ error: "Failed to initialize user profile" });
+  }
 }
 
 /**

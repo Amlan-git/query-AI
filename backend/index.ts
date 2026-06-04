@@ -2,6 +2,7 @@ import express from "express";
 import {
   applyGlobalMiddleware,
   verifyToken,
+  ensureAppUser,
   rateLimiter,
   errorHandler
 } from "./middleware";
@@ -25,6 +26,7 @@ app.get("/health", (_req, res) => {
 
 // Apply global JWT verification
 app.use(verifyToken);
+app.use(ensureAppUser);
 
 // Mount logical routes
 app.use("/", authRouter);

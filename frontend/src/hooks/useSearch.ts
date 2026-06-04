@@ -22,6 +22,27 @@ export type SearchState =
   | { status: "complete"; query: string; questions: string[]; turns: SearchTurn[]; answer: string; sources: Source[]; images: string[]; followUps: string[]; conversationId: string }
   | { status: "error"; message: string };
 
+async function getResponseErrorMessage(response: Response) {
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const body = await response.json();
+      if (typeof body?.error === "string" && body.error.trim()) {
+        return body.error;
+      }
+    }
+
+    const text = await response.text();
+    if (text.trim()) {
+      return text.trim();
+    }
+  } catch (err) {
+    console.error("Failed to parse error response:", err);
+  }
+
+  return "Search failed. Please try again.";
+}
+
 export function useSearch() {
   const [state, setState] = useState<SearchState>({ status: "idle" });
 
@@ -74,7 +95,8 @@ export function useSearch() {
       });
 
       if (!response.ok || !response.body) {
-        setState({ status: "error", message: "Search failed. Please try again." });
+        const message = await getResponseErrorMessage(response);
+        setState({ status: "error", message });
         return;
       }
 

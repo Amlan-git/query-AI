@@ -43,6 +43,20 @@ const ANSWER_MODEL_CANDIDATES = [
 
 const router = Router();
 
+function getPublicSearchError(err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes("Missing TAVILY_API_KEY")) {
+        return "Search provider is not configured. Please add TAVILY_API_KEY in deployment settings.";
+    }
+
+    if (/tavily|api key|unauthorized|forbidden|401|403/i.test(message)) {
+        return "Search provider rejected the request. Please check the Tavily API key in deployment settings.";
+    }
+
+    return "Search failed. Please try again.";
+}
+
 function formatSearchResultsForPrompt(results: SearchResult[]) {
     return results
         .map((result, index) => {
@@ -352,11 +366,12 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
         }
 
         // Log actual application failures with the requested prefix [query_ask-error]
+        const publicError = getPublicSearchError(err);
         console.error("[query_ask-error] Search/Stream failure:", err);
 
         // If headers have not been sent yet, we can safely respond with a standard 500 JSON error
         if (!res.headersSent) {
-            res.status(500).json({ error: "Search failed. Please try again." });
+            res.status(500).json({ error: publicError });
         } else {
             // If headers have already been sent, writing a JSON response is impossible and would crash the server.
             // Instead, we inject a custom structured error event so the client handles the interruption gracefully.
@@ -524,10 +539,11 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
             return;
         }
 
+        const publicError = getPublicSearchError(err);
         console.error("[follow_up-error] Search/Stream failure:", err);
 
         if (!res.headersSent) {
-            res.status(500).json({ error: "Search failed. Please try again." });
+            res.status(500).json({ error: publicError });
         } else {
             res.write("\n<STREAM_ERROR>\n");
             res.write(JSON.stringify({ error: "Stream interrupted unexpectedly" }));
