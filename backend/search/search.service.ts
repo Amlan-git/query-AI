@@ -36,6 +36,10 @@ export async function performSearch(query: string): Promise<SearchResponse> {
         includeImages: true
     });
 
+    if (!Array.isArray(response.results)) {
+        throw new Error("Tavily response did not include search results");
+    }
+
     return {
         results: response.results.map((result) => ({
             title: result.title || "Untitled source",

@@ -23,16 +23,22 @@ export type SearchState =
   | { status: "error"; message: string };
 
 async function getResponseErrorMessage(response: Response) {
+  const fallback = `Search failed. Please try again. (HTTP ${response.status})`;
+
   try {
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
       const body = await response.json();
       if (typeof body?.error === "string" && body.error.trim()) {
-        return body.error;
+        return body.requestId ? `${body.error} (${body.requestId})` : body.error;
       }
     }
 
     const text = await response.text();
+    if (contentType.includes("text/html")) {
+      return fallback;
+    }
+
     if (text.trim()) {
       return text.trim();
     }
@@ -40,7 +46,7 @@ async function getResponseErrorMessage(response: Response) {
     console.error("Failed to parse error response:", err);
   }
 
-  return "Search failed. Please try again.";
+  return fallback;
 }
 
 export function useSearch() {

@@ -21,7 +21,17 @@ applyGlobalMiddleware(app);
 app.use(rateLimiter);
 
 app.get("/health", (_req, res) => {
-    res.status(200).json({ ok: true });
+    res.status(200).json({
+        ok: true,
+        env: {
+            database: Boolean(process.env.DATABASE_URL),
+            supabaseUrl: Boolean(process.env.SUPABASE_URL),
+            supabaseSecret: Boolean(process.env.SUPABASE_SECRET_KEY),
+            tavily: Boolean(process.env.TAVILY_API_KEY),
+            googleGenerativeAi: Boolean(process.env.GOOGLE_GENERATIVE_AI_API_KEY),
+            frontendUrl: Boolean(process.env.FRONTEND_URL)
+        }
+    });
 });
 
 // Apply global JWT verification
