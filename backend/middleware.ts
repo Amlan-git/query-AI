@@ -28,9 +28,6 @@ declare global {
 export async function verifyToken(req: Request, res: Response, next: NextFunction) {
   // Define public routes exclusion list (method and path pairings)
   const publicRoutes = [
-    { method: "POST", path: "/api/auth/login" },
-    { method: "POST", path: "/api/auth/logout" },
-    { method: "GET", path: "/api/auth/callback" },
     { method: "GET", path: "/health" },
     { method: "POST", path: "/signup" },
     { method: "POST", path: "/signin" }
@@ -113,8 +110,20 @@ function getUserProfile(user: User) {
   return { name, provider };
 }
 
+/**
+ * Per-warm-container cache of user IDs already provisioned in the local DB.
+ * Each cold-started function does the upsert exactly once per user, not once
+ * per request — that's the difference between sustainable serverless and
+ * exhausting Supabase's direct-connection cap on the first burst of traffic.
+ */
+const provisionedUsers = new Set<string>();
+
 export async function ensureAppUser(req: Request, res: Response, next: NextFunction) {
   if (!req.user) {
+    return next();
+  }
+
+  if (provisionedUsers.has(req.user.id)) {
     return next();
   }
 
@@ -140,6 +149,7 @@ export async function ensureAppUser(req: Request, res: Response, next: NextFunct
         provider
       }
     });
+    provisionedUsers.add(req.user.id);
     return next();
   } catch (err: unknown) {
     console.error("[user-sync] Failed to sync authenticated user:", err);

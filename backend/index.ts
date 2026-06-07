@@ -34,7 +34,9 @@ app.get("/health", (_req, res) => {
     });
 });
 
-// Apply global JWT verification
+// Apply global JWT verification, then on-demand user provisioning.
+// ensureAppUser caches per warm container so it does the upsert only once
+// per user, not once per request — that's what makes it safe on serverless.
 app.use(verifyToken);
 app.use(ensureAppUser);
 

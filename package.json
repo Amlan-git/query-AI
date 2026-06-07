@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build:frontend": "cd frontend && bun run build",
-    "vercel-build": "bun run build:frontend"
+    "prisma:generate": "cd backend && bun --bun x prisma generate",
+    "vercel-build": "bun run prisma:generate && bun run build:frontend"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.80",
