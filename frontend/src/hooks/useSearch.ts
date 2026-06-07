@@ -90,8 +90,9 @@ export function useSearch() {
         return;
       }
 
-      // 2. Open HTTP connection for Server-Sent Events (SSE)
-      const response = await fetch("/query_ask", {
+      // 2. Open HTTP connection for the raw text stream.
+      const endpoint = conversationId ? "/query_ask/follow_up" : "/query_ask";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

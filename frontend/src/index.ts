@@ -45,6 +45,7 @@ const server = serve({
       url.pathname === "/signin" ||
       url.pathname === "/signup" ||
       url.pathname === "/query_ask" ||
+      url.pathname.startsWith("/query_ask/") ||
       url.pathname.startsWith("/conversations") ||
       url.pathname === "/health"
     ) {
