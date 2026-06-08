@@ -17,10 +17,6 @@ export type SearchResponse = {
     images: string[];
 };
 
-const tavilyClient = tavily({
-    apiKey: process.env.TAVILY_API_KEY
-});
-
 function normalizeImages(images: TavilyImage[] | undefined) {
     return (images || [])
         .map((image) => typeof image === "string" ? image : image.url)
@@ -29,10 +25,20 @@ function normalizeImages(images: TavilyImage[] | undefined) {
 }
 
 export async function performSearch(query: string): Promise<SearchResponse> {
+    const apiKey = process.env.TAVILY_API_KEY;
+    if (!apiKey) {
+        throw new Error("Missing TAVILY_API_KEY");
+    }
+
+    const tavilyClient = tavily({ apiKey });
     const response = await tavilyClient.search(query, {
         searchDepth: "advanced",
         includeImages: true
     });
+
+    if (!Array.isArray(response.results)) {
+        throw new Error("Tavily response did not include search results");
+    }
 
     return {
         results: response.results.map((result) => ({

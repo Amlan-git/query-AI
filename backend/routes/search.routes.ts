@@ -43,6 +43,32 @@ const ANSWER_MODEL_CANDIDATES = [
 
 const router = Router();
 
+function createRequestId() {
+    return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getPublicSearchError(err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes("Missing TAVILY_API_KEY")) {
+        return "Search provider is not configured. Please add TAVILY_API_KEY in deployment settings.";
+    }
+
+    if (/tavily|api key|unauthorized|forbidden|401|403/i.test(message)) {
+        return "Search provider rejected the request. Please check the Tavily API key in deployment settings.";
+    }
+
+    if (/database|prisma|foreign key|connection|DATABASE_URL|P10\d{2}|P20\d{2}/i.test(message)) {
+        return "Database failed while initializing the search. Please check DATABASE_URL and Prisma migrations in the deployed environment.";
+    }
+
+    if (/fetch|network|ENOTFOUND|ECONNRESET|ETIMEDOUT|timeout/i.test(message)) {
+        return "Search provider request failed at the network layer. Please retry and check Vercel function logs.";
+    }
+
+    return "Search failed. Please try again.";
+}
+
 function formatSearchResultsForPrompt(results: SearchResult[]) {
     return results
         .map((result, index) => {
@@ -352,16 +378,18 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
         }
 
         // Log actual application failures with the requested prefix [query_ask-error]
-        console.error("[query_ask-error] Search/Stream failure:", err);
+        const requestId = createRequestId();
+        const publicError = getPublicSearchError(err);
+        console.error(`[query_ask-error] Search/Stream failure (${requestId}):`, err);
 
         // If headers have not been sent yet, we can safely respond with a standard 500 JSON error
         if (!res.headersSent) {
-            res.status(500).json({ error: "Search failed. Please try again." });
+            res.status(500).json({ error: publicError, requestId });
         } else {
             // If headers have already been sent, writing a JSON response is impossible and would crash the server.
             // Instead, we inject a custom structured error event so the client handles the interruption gracefully.
             res.write("\n<STREAM_ERROR>\n");
-            res.write(JSON.stringify({ error: "Stream interrupted unexpectedly" }));
+            res.write(JSON.stringify({ error: "Stream interrupted unexpectedly", requestId }));
             res.write("\n</STREAM_ERROR>\n");
             res.end();
         }
@@ -524,13 +552,15 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
             return;
         }
 
-        console.error("[follow_up-error] Search/Stream failure:", err);
+        const requestId = createRequestId();
+        const publicError = getPublicSearchError(err);
+        console.error(`[follow_up-error] Search/Stream failure (${requestId}):`, err);
 
         if (!res.headersSent) {
-            res.status(500).json({ error: "Search failed. Please try again." });
+            res.status(500).json({ error: publicError, requestId });
         } else {
             res.write("\n<STREAM_ERROR>\n");
-            res.write(JSON.stringify({ error: "Stream interrupted unexpectedly" }));
+            res.write(JSON.stringify({ error: "Stream interrupted unexpectedly", requestId }));
             res.write("\n</STREAM_ERROR>\n");
             res.end();
         }
