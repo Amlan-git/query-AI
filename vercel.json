@@ -42,7 +42,11 @@
       "destination": "/api/health"
     },
     {
-      "source": "/(.*)",
+      "source": "/(auth|auth/callback|search|dashboard)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/search/:conversationId",
       "destination": "/index.html"
     }
   ]
