@@ -22,6 +22,33 @@ export type SearchState =
   | { status: "complete"; query: string; questions: string[]; turns: SearchTurn[]; answer: string; sources: Source[]; images: string[]; followUps: string[]; conversationId: string }
   | { status: "error"; message: string };
 
+async function getResponseErrorMessage(response: Response) {
+  const fallback = `Search failed. Please try again. (HTTP ${response.status})`;
+
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const body = await response.json();
+      if (typeof body?.error === "string" && body.error.trim()) {
+        return body.requestId ? `${body.error} (${body.requestId})` : body.error;
+      }
+    }
+
+    const text = await response.text();
+    if (contentType.includes("text/html")) {
+      return fallback;
+    }
+
+    if (text.trim()) {
+      return text.trim();
+    }
+  } catch (err) {
+    console.error("Failed to parse error response:", err);
+  }
+
+  return fallback;
+}
+
 export function useSearch() {
   const [state, setState] = useState<SearchState>({ status: "idle" });
 
@@ -63,8 +90,9 @@ export function useSearch() {
         return;
       }
 
-      // 2. Open HTTP connection for Server-Sent Events (SSE)
-      const response = await fetch("/query_ask", {
+      // 2. Open HTTP connection for the raw text stream.
+      const endpoint = conversationId ? "/query_ask/follow_up" : "/query_ask";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -74,7 +102,8 @@ export function useSearch() {
       });
 
       if (!response.ok || !response.body) {
-        setState({ status: "error", message: "Search failed. Please try again." });
+        const message = await getResponseErrorMessage(response);
+        setState({ status: "error", message });
         return;
       }
 

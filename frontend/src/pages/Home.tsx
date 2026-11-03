@@ -1,4 +1,5 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
+import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUp, Globe2, Quote, Search, Sparkles, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";

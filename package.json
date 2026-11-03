@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build:frontend": "cd frontend && bun run build",
-    "vercel-build": "bun run build:frontend"
+    "prisma:generate": "cd backend && bun --bun x prisma generate",
+    "vercel-build": "bun run prisma:generate && bun run build:frontend"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.80",
@@ -47,6 +48,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vercel/node": "^5.5.9",
+    "prisma": "^7.8.0",
     "tailwindcss": "^4.1.11",
     "tsx": "^4.22.1",
     "typescript": "^5.9.3"

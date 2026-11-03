@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { prisma } from "../db";
-import { createSupabaseClient } from "../client";
+import { verifyAccessToken } from "../auth";
 import z from "zod";
 
 // Validation schema for signing up/signing in OAuth users.
@@ -43,17 +43,13 @@ router.post("/signup", async (req: Request, res: Response) => {
         return;
     }
 
-    // 3. Verify JWT with a fresh Supabase client instance
-    // INLINE COMMENT: A fresh Supabase client instance is created per request to avoid session/auth state
-    // leaks across concurrent requests. Reusing a module-level service-role client is unsafe.
-    const supabase = createSupabaseClient();
-    const { data, error } = await supabase.auth.getUser(token);
+    const verification = await verifyAccessToken(token);
 
-    if (error || !data.user) {
-        console.warn("[signup] Failure: Invalid or expired token", error?.message);
-        res.status(401).json({ error: "Invalid or expired token" });
+    if (!verification.user) {
+        res.status(verification.status).json({ error: verification.error });
         return;
     }
+    const authenticatedUser = verification.user;
 
     try {
         // 4. Sync/Upsert user in the local Prisma PostgreSQL database
@@ -64,11 +60,11 @@ router.post("/signup", async (req: Request, res: Response) => {
         // repeat signup requests gracefully (e.g. if the user clears local storage/cookies and
         // signs up again) without throwing unique constraint violations.
         const user = await prisma.user.upsert({
-            where: { id: data.user.id },
+            where: { id: authenticatedUser.id },
             update: { name: parseResult.data.name },
             create: {
-                id: data.user.id,
-                email: data.user.email!,
+                id: authenticatedUser.id,
+                email: authenticatedUser.email!,
                 name: parseResult.data.name,
                 provider: parseResult.data.provider
             }
@@ -105,17 +101,13 @@ router.post("/signin", async (req: Request, res: Response) => {
         return;
     }
 
-    // 3. Verify JWT with a fresh Supabase client instance
-    // INLINE COMMENT: A fresh Supabase client instance is created per request to avoid session/auth state
-    // leaks across concurrent requests. Reusing a module-level service-role client is unsafe.
-    const supabase = createSupabaseClient();
-    const { data, error } = await supabase.auth.getUser(token);
+    const verification = await verifyAccessToken(token);
 
-    if (error || !data.user) {
-        console.warn("[signin] Failure: Invalid or expired token", error?.message);
-        res.status(401).json({ error: "Invalid or expired token" });
+    if (!verification.user) {
+        res.status(verification.status).json({ error: verification.error });
         return;
     }
+    const authenticatedUser = verification.user;
 
     try {
         // 4. Sync/Upsert user in the local Prisma PostgreSQL database
@@ -126,11 +118,11 @@ router.post("/signin", async (req: Request, res: Response) => {
         // is wiped or reset in development/production but the user still exists in Supabase. It auto-heals
         // the record instead of failing.
         const user = await prisma.user.upsert({
-            where: { id: data.user.id },
+            where: { id: authenticatedUser.id },
             update: { name: parseResult.data.name },
             create: {
-                id: data.user.id,
-                email: data.user.email!,
+                id: authenticatedUser.id,
+                email: authenticatedUser.email!,
                 name: parseResult.data.name,
                 provider: parseResult.data.provider
             }
