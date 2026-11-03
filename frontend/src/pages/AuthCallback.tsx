@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router";
 import { supabase } from "@/lib/supabase";
+import { resolveOAuthSession } from "@/lib/auth-flow";
+import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -12,7 +14,7 @@ export default function AuthCallback() {
   const exchangeInitiated = useRef(false);
 
   useEffect(() => {
-    async function syncAndNavigate(session: any) {
+    async function syncAndNavigate(session: Session) {
       const name =
         session.user?.user_metadata?.full_name ||
         session.user?.user_metadata?.name ||
@@ -49,7 +51,7 @@ export default function AuthCallback() {
 
       // Navigate to the main app
       const prompt = new URLSearchParams(window.location.search).get("prompt");
-      navigate(prompt ? `/search?prompt=${encodeURIComponent(prompt)}` : "/search");
+      navigate(prompt ? `/search?prompt=${encodeURIComponent(prompt)}` : "/search", { replace: true });
     }
 
     async function handleCallback() {
@@ -57,58 +59,19 @@ export default function AuthCallback() {
       exchangeInitiated.current = true;
 
       try {
-        // 1. Check if a session already exists first (e.g. if HMR reloaded or pre-exchanged)
-        const { data: { session: existingSession } } = await supabase.auth.getSession();
-        if (existingSession) {
-          console.log("[auth-callback] Session already exists in client, navigating...");
-          await syncAndNavigate(existingSession);
-          return;
+        const callbackUrl = new URL(window.location.href);
+        const session = await resolveOAuthSession(supabase.auth, callbackUrl.search);
+        // OAuth codes can only be redeemed once. A reload during profile sync
+        // must recover the newly established session instead of redeeming it again.
+        if (callbackUrl.searchParams.has("code")) {
+          callbackUrl.searchParams.delete("code");
+          window.history.replaceState(window.history.state, "", callbackUrl);
         }
-
-        // 2. Extract the PKCE authorization code from the URL query params.
-        const code = new URLSearchParams(window.location.search).get("code");
-
-        if (!code) {
-          setStatus("error");
-          setErrorMessage("No authentication code found in the callback URL.");
-          return;
-        }
-
-        // Diagnostic Logging of localStorage
-        console.log("[auth-callback] All localStorage keys:", Object.keys(localStorage));
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key) {
-            console.log(`[auth-callback] localStorage key: ${key} = ${localStorage.getItem(key)?.substring(0, 50)}...`);
-          }
-        }
-
-        // 3. Exchange the code for a session.
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-
-        if (error || !data.session) {
-          // If exchangeCodeForSession failed, double check if a session somehow got set during the exchange
-          const { data: { session: backupSession } } = await supabase.auth.getSession();
-          if (backupSession) {
-            console.log("[auth-callback] Exchange error occurred but active session found, continuing...");
-            await syncAndNavigate(backupSession);
-            return;
-          }
-
-          console.error("[auth-callback] Exchange code failed:", error);
-          setStatus("error");
-          setErrorMessage(
-            error?.message || "Authentication failed. Please try again."
-          );
-          return;
-        }
-
-        // 4. Sync session to backend and navigate
-        await syncAndNavigate(data.session);
+        await syncAndNavigate(session);
       } catch (err: unknown) {
         console.error("[auth-callback] Unexpected error:", err);
         setStatus("error");
-        setErrorMessage("An unexpected error occurred. Please try again.");
+        setErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred. Please try again.");
       }
     }
 

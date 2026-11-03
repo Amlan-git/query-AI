@@ -4,12 +4,9 @@ import helmet from "helmet";
 import cors from "cors";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import type { User } from "@supabase/supabase-js";
-import { createSupabaseClient } from "./client";
+import { verifyAccessToken } from "./auth";
 import { prisma } from "./db";
 import { AuthProvider } from "./prisma/generated/enums";
-
-// Initialize Supabase Client for JWT verification
-const client = createSupabaseClient();
 
 // Extend the Express Request type to include the user property typed properly
 declare global {
@@ -62,25 +59,13 @@ export async function verifyToken(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 
-  try {
-    // Validate the JWT against Supabase's auth service directly (no manual secret verification)
-    const { data, error } = await client.auth.getUser(token);
-
-    if (error || !data || !data.user) {
-      console.warn(
-        `[auth-fail] ${req.method} ${req.path} | reason: ${error?.message || "User not found"} | ip: ${ip}`
-      );
-      return res.status(401).json({ error: "Invalid or expired token" });
-    }
-
-    // Attach user object securely to request context
-    req.user = data.user;
-    return next();
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[auth-fail] ${req.method} ${req.path} | reason: Internal auth error (${errorMsg}) | ip: ${ip}`);
-    return res.status(401).json({ error: "Invalid or expired token" });
+  const verification = await verifyAccessToken(token);
+  if (!verification.user) {
+    console.warn(`[auth-fail] ${req.method} ${req.path} | status: ${verification.status} | ip: ${ip}`);
+    return res.status(verification.status).json({ error: verification.error });
   }
+  req.user = verification.user;
+  return next();
 }
 
 /**
