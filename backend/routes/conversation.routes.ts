@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { Response } from "express";
-import { prisma } from "../db";
+import { prisma } from "../db.js";
 import z from "zod";
 
 // Pagination validation schema for listing conversations

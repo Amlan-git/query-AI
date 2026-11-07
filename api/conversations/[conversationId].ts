@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { handleExpressRoute } from "../../vercel-handler";
+import { handleExpressRoute } from "../../vercel-handler.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const conversationId = req.query.conversationId;

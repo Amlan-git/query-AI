@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { handleExpressRoute } from "../../vercel-handler";
+import { handleExpressRoute } from "../../vercel-handler.js";
 
 export const config = {
   api: {

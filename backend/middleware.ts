@@ -4,9 +4,9 @@ import helmet from "helmet";
 import cors from "cors";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import type { User } from "@supabase/supabase-js";
-import { verifyAccessToken } from "./auth";
-import { prisma } from "./db";
-import { AuthProvider } from "./prisma/generated/enums";
+import { verifyAccessToken } from "./auth.js";
+import { prisma } from "./db.js";
+import { AuthProvider } from "./prisma/generated/enums.js";
 
 // Extend the Express Request type to include the user property typed properly
 declare global {

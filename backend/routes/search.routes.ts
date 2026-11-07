@@ -2,11 +2,11 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { streamText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { prisma } from "../db";
+import { prisma } from "../db.js";
 import z from "zod";
-import { PROMPT_TEMPLATE, SYSTEM_PROMPT } from "../prompts";
-import { searchLimiter } from "../middleware";
-import { performSearch, type SearchResult } from "../search/search.service";
+import { PROMPT_TEMPLATE, SYSTEM_PROMPT } from "../prompts.js";
+import { searchLimiter } from "../middleware.js";
+import { performSearch, type SearchResult } from "../search/search.service.js";
 import type { ModelMessage } from "ai";
 
 // Request body validation schema for the /query_ask endpoint.

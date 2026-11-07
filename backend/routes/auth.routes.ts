@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { prisma } from "../db";
-import { verifyAccessToken } from "../auth";
+import { prisma } from "../db.js";
+import { verifyAccessToken } from "../auth.js";
 import z from "zod";
 
 // Validation schema for signing up/signing in OAuth users.

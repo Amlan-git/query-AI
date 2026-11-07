@@ -5,10 +5,10 @@ import {
   ensureAppUser,
   rateLimiter,
   errorHandler
-} from "./middleware";
-import authRouter from "./routes/auth.routes";
-import searchRouter from "./routes/search.routes";
-import conversationRouter from "./routes/conversation.routes";
+} from "./middleware.js";
+import authRouter from "./routes/auth.routes.js";
+import searchRouter from "./routes/search.routes.js";
+import conversationRouter from "./routes/conversation.routes.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);

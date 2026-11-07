@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import app from "./backend/index";
+import app from "./backend/index.js";
 
 /**
  * Hand a Vercel serverless invocation to the Express app and keep the

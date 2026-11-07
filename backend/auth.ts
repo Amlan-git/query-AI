@@ -1,5 +1,5 @@
 import { isAuthRetryableFetchError, type User } from "@supabase/supabase-js";
-import { createSupabaseClient } from "./client";
+import { createSupabaseClient } from "./client.js";
 
 type Verification =
   | { user: User }
