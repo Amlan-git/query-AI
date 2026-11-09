@@ -9,7 +9,13 @@ test("summarizes completed latency separately from failures and deduplicates eve
     "unrelated log line",
     JSON.stringify(completed),
     JSON.stringify({ message: JSON.stringify(completed) }),
-    JSON.stringify({ ...completed, requestId: "two", outcome: "failed", durationMs: 100 }),
+    JSON.stringify({
+      message: "request wrapper",
+      logs: [
+        { message: JSON.stringify(completed) },
+        { message: JSON.stringify({ ...completed, requestId: "two", outcome: "failed", durationMs: 100 }) },
+      ],
+    }),
     JSON.stringify({ ...completed, requestId: "three", outcome: "cancelled" }),
   ];
   const result = Bun.spawnSync([process.execPath, new URL("../summarize-search.ts", import.meta.url).pathname], {
