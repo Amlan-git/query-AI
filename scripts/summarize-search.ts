@@ -10,10 +10,9 @@ type Event = {
   issues?: string[];
 };
 
-function decode(line: string): Event | null {
+function decode(value: unknown): Event | null {
   try {
-    const log = JSON.parse(line);
-    const entry = typeof log?.message === "string" ? JSON.parse(log.message) : log;
+    const entry = typeof value === "string" ? JSON.parse(value) : value as Event;
     if (
       !["search_client", "search_server"].includes(entry?.event) ||
       !["new", "follow_up", "history"].includes(entry.operation) ||
@@ -40,11 +39,16 @@ function percentiles(values: number[]) {
 
 const groups = new Map<string, Map<string, Event>>();
 for await (const line of console) {
-  const event = decode(line);
-  if (!event) continue;
-  const group = `${event.event}.${event.operation}`;
-  if (!groups.has(group)) groups.set(group, new Map());
-  groups.get(group)!.set(event.requestId, event);
+  let log;
+  try { log = JSON.parse(line); } catch { continue; }
+  const messages = Array.isArray(log?.logs) ? log.logs.map(entry => entry?.message) : [];
+  for (const value of [log, log?.message, ...messages]) {
+    const event = decode(value);
+    if (!event) continue;
+    const group = `${event.event}.${event.operation}`;
+    if (!groups.has(group)) groups.set(group, new Map());
+    groups.get(group)!.set(event.requestId, event);
+  }
 }
 
 const report = Object.fromEntries([...groups].map(([group, events]) => {
