@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { startSearchMeasurement } from "@/lib/search-telemetry";
 
 export type Source = {
   url: string;
@@ -52,7 +53,16 @@ async function getResponseErrorMessage(response: Response) {
 export function useSearch() {
   const [state, setState] = useState<SearchState>({ status: "idle" });
 
+  const activeSearch = useRef<AbortController | null>(null);
+  useEffect(() => () => activeSearch.current?.abort(), []);
+
   async function search(query: string, conversationId?: string): Promise<void> {
+    activeSearch.current?.abort();
+    const controller = new AbortController();
+    activeSearch.current = controller;
+    const measurement = startSearchMeasurement(conversationId ? "follow_up" : "new");
+    let token: string | undefined;
+    let outcome: "complete" | "failed" | "cancelled" = "failed";
     const previousTurns =
       conversationId && "turns" in state
         ? state.turns
@@ -85,6 +95,8 @@ export function useSearch() {
     try {
       // 1. Get Supabase session to secure request with JWT token
       const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+      controller.signal.throwIfAborted();
       if (!session) {
         setState({ status: "error", message: "Not authenticated" });
         return;
@@ -96,13 +108,17 @@ export function useSearch() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${session.access_token}`
+          "Authorization": `Bearer ${session.access_token}`,
+          ...(measurement.requestId ? { "X-Search-Request-Id": measurement.requestId } : {})
         },
+        signal: controller.signal,
         body: JSON.stringify(conversationId ? { query, conversationId } : { query })
       });
 
+      controller.signal.throwIfAborted();
       if (!response.ok || !response.body) {
         const message = await getResponseErrorMessage(response);
+        controller.signal.throwIfAborted();
         setState({ status: "error", message });
         return;
       }
@@ -116,10 +132,12 @@ export function useSearch() {
       let parsedSources: Source[] = [];
       let parsedImages: string[] = [];
       let followUps: string[] = [];
-      let sawStreamContent = false;
+      let sawCompletion = false;
+      let sawImagesBlock = false;
 
       while (true) {
         const { done, value } = await reader.read();
+        controller.signal.throwIfAborted();
         if (done) break;
 
         // Decode chunk and accumulate in text buffer
@@ -165,6 +183,7 @@ export function useSearch() {
         if (imagesMatch && imagesMatch[1]) {
           try {
             parsedImages = JSON.parse(imagesMatch[1]);
+            sawImagesBlock = true;
             buffer = buffer.replace(/<IMAGES>.*?<\/IMAGES>\n?/s, "");
             setState({
               status: "streaming",
@@ -185,8 +204,13 @@ export function useSearch() {
         // C. Trap error blocks injected during server disruptions
         const errorMatch = buffer.match(/<STREAM_ERROR>(.*?)<\/STREAM_ERROR>/s);
         if (errorMatch) {
-          setState({ status: "error", message: "Stream interrupted. Please try again." });
-          break;
+          const requestId = response.headers.get("X-Search-Request-Id");
+          setState({
+            status: "error",
+            message: `Stream interrupted. Please try again.${requestId ? ` (${requestId})` : ""}`,
+          });
+          await reader.cancel().catch(() => {});
+          return;
         }
 
         // D. Extract follow-up suggestions sent after answer generation completes.
@@ -200,6 +224,7 @@ export function useSearch() {
               .replace(/<IMAGES>.*$/s, "")
               .trimEnd();
             followUps = JSON.parse(followUpsMatch[1]);
+            sawCompletion = Array.isArray(followUps);
             buffer = buffer.replace(/<FOLLOW_UPS>.*?<\/FOLLOW_UPS>\n?/s, "");
             setState({
               status: "streaming",
@@ -226,7 +251,7 @@ export function useSearch() {
           .replace(/<STREAM_ERROR>.*$/s, "");
 
         fullAnswer = displayBuffer.trimEnd();
-        sawStreamContent = true;
+        if (sawImagesBlock && fullAnswer.trim()) measurement.firstText();
         setState({
           status: "streaming",
           query,
@@ -245,7 +270,17 @@ export function useSearch() {
         });
       }
 
-      // E. Complete the stream when the network reader finishes.
+      // A clean EOF can still be a truncated stream. Suggestions are sent
+      // after the answer and the persistence attempts on both search routes.
+      if (!sawCompletion || !fullAnswer.trim() || !resolvedConversationId) {
+        const requestId = response.headers.get("X-Search-Request-Id");
+        setState({
+          status: "error",
+          message: `Stream closed unexpectedly.${requestId ? ` (${requestId})` : ""}`,
+        });
+        return;
+      }
+      outcome = "complete";
       setState(current => {
         if (current.status === "streaming") {
           return {
@@ -260,19 +295,23 @@ export function useSearch() {
             conversationId: current.conversationId
           };
         }
-        if (!sawStreamContent && current.status !== "complete" && current.status !== "error") {
-          return { status: "error", message: "Stream closed unexpectedly" };
-        }
         return current;
       });
 
     } catch (error) {
-      console.error("Error executing SSE request:", error);
-      setState({ status: "error", message: "Network connection failed. Please try again." });
+      if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+        outcome = "cancelled";
+      } else {
+        setState({ status: "error", message: "Network connection failed. Please try again." });
+      }
+    } finally {
+      if (activeSearch.current === controller) activeSearch.current = null;
+      if (token) measurement.report(token, outcome);
     }
   }
 
   function reset() {
+    activeSearch.current?.abort();
     setState({ status: "idle" });
   }
 

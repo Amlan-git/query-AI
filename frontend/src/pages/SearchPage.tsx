@@ -1,3 +1,4 @@
+import { startSearchMeasurement } from "@/lib/search-telemetry";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router";
 import { supabase } from "@/lib/supabase";
@@ -72,6 +73,9 @@ export default function SearchPage() {
     }
 
     async function loadConversation(convId: string) {
+      const measurement = startSearchMeasurement("history");
+      let token: string | undefined;
+      let outcome: "complete" | "failed" = "failed";
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
@@ -79,6 +83,7 @@ export default function SearchPage() {
           return;
         }
 
+        token = session.access_token;
         const response = await fetch(`/conversations/${convId}`, {
           headers: {
             "Authorization": `Bearer ${session.access_token}`
@@ -92,7 +97,11 @@ export default function SearchPage() {
         }
 
         const json = await response.json();
-        const messages = (json.data?.messages || []) as Array<{
+        if (!Array.isArray(json.data?.messages)) {
+          navigate("/search");
+          return;
+        }
+        const messages = json.data.messages as Array<{
           role: string;
           content: string;
           sources: Array<{ url: string; title: string; snippet?: string }> | null;
@@ -146,9 +155,11 @@ export default function SearchPage() {
         } else {
           setComplete("", [], convId);
         }
-      } catch (err) {
-        console.error("Failed to load conversation details:", err);
+        outcome = "complete";
+      } catch {
         navigate("/search");
+      } finally {
+        if (token) measurement.report(token, outcome);
       }
     }
 

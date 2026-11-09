@@ -6,7 +6,8 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 
 const exchangeCodeForSession = mock();
 const signInWithOAuth = mock(async () => ({ error: null }));
-const getSession = mock(async () => ({ data: { session: null }, error: null }));
+const getSession = mock(async (): Promise<{ data: { session: { access_token: string } | null }; error: null }> =>
+  ({ data: { session: null }, error: null }));
 mock.module("../src/lib/supabase", () => ({
   supabase: { auth: { exchangeCodeForSession, getSession, signInWithOAuth,
     getUser: async () => ({ data: { user: null }, error: null }),
@@ -17,6 +18,7 @@ const { default: AuthCallback } = await import("../src/pages/AuthCallback");
 
 const { default: Auth } = await import("../src/pages/Auth");
 const { default: ProtectedRoute } = await import("../src/components/ProtectedRoute");
+const { useSearch } = await import("../src/hooks/useSearch");
 
 let browser: Window;
 let root: Root;
@@ -35,6 +37,7 @@ beforeEach(() => {
   root = createRoot(browser.document.body as unknown as HTMLElement);
   exchangeCodeForSession.mockReset();
   signInWithOAuth.mockClear();
+  getSession.mockResolvedValue({ data: { session: null }, error: null });
 });
 
 afterEach(async () => {
@@ -141,4 +144,84 @@ test.each([
   await beginSignIn(`/auth?returnTo=${encodeURIComponent(destination)}`);
   await renderCallback("?code=test-code");
   expect(browser.document.body.textContent).toContain("Search page");
+});
+
+const conversationId = "dbf9e48a-6f87-4d72-b84d-01c1d6932752";
+
+async function mountSearch() {
+  getSession.mockResolvedValue({ data: { session: { access_token: "test-token" } }, error: null });
+  let controls!: ReturnType<typeof useSearch>;
+  function SearchProbe() {
+    controls = useSearch();
+    return <output>{controls.state.status}</output>;
+  }
+  await act(async () => root.render(<SearchProbe />));
+  return {
+    search: (id?: string) => controls.search("private query", id),
+    reset: () => controls.reset(),
+  };
+}
+
+test.each([
+  ["new", undefined, true],
+  ["follow_up", conversationId, true],
+  ["new", undefined, false],
+] as const)("reports %s search (conversation=%s, complete=%s)", async (operation, id, complete) => {
+  const controls = await mountSearch();
+  const requests = mock(async (url: string, _init: RequestInit) => {
+    if (url.endsWith("/telemetry")) return new Response(null, { status: 204 });
+    const chunks = [
+      "<ME",
+      `TA>${JSON.stringify({ conversationId })}</META>\n<SOURCES>[]</SOURCES>\n<IMAGES>[]</IMAGES>\n`,
+      "private answer",
+      ...(complete ? ["\n<FOLLOW_UPS>[]</FOLLOW_UPS>\n"] : []),
+    ];
+    return new Response(new ReadableStream({
+      start(stream) {
+        for (const chunk of chunks) stream.enqueue(new TextEncoder().encode(chunk));
+        stream.close();
+      },
+    }));
+  });
+  globalThis.fetch = requests as unknown as typeof fetch;
+
+  await act(async () => controls.search(id));
+
+  expect(browser.document.body.textContent).toBe(complete ? "complete" : "error");
+  const [searchRequest, telemetryRequest] = requests.mock.calls;
+  expect(searchRequest?.[0]).toBe(id ? "/query_ask/follow_up" : "/query_ask");
+  expect(telemetryRequest?.[0]).toBe("/query_ask/telemetry");
+  expect(JSON.parse(String(telemetryRequest?.[1].body))).toEqual({
+    operation,
+    requestId: (searchRequest?.[1].headers as Record<string, string>)["X-Search-Request-Id"],
+    outcome: complete ? "complete" : "failed",
+    firstTextMs: expect.any(Number),
+    durationMs: expect.any(Number),
+  });
+});
+
+test("reset cancels an in-flight search and reports cancellation separately", async () => {
+  const controls = await mountSearch();
+  let requestStarted!: () => void;
+  const started = new Promise<void>(resolve => { requestStarted = resolve; });
+  const requests = mock(async (url: string, init: RequestInit) => {
+    if (url.endsWith("/telemetry")) return new Response(null, { status: 204 });
+    requestStarted();
+    return new Promise<Response>((_, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+  });
+  globalThis.fetch = requests as unknown as typeof fetch;
+
+  await act(async () => {
+    const pending = controls.search();
+    await started;
+    controls.reset();
+    await pending;
+  });
+
+  expect(browser.document.body.textContent).toBe("idle");
+  expect(JSON.parse(String(requests.mock.calls[1]?.[1].body))).toMatchObject({
+    outcome: "cancelled", firstTextMs: null,
+  });
 });
