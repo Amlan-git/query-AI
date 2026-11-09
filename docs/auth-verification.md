@@ -23,3 +23,8 @@ The production smoke check exits with an error if the token is missing,
 the Site URL differs from the production root, or the redirect allowlist
 lacks the exact production `/auth/callback` URL. Preview URLs run only the
 public smoke checks. No Google or GitHub account is needed.
+
+To run from GitHub, add `SUPABASE_ACCESS_TOKEN` under the repository's
+**Settings → Secrets and variables → Actions**. Once the workflow is on
+the default branch, open **Actions → Production auth check → Run workflow**.
+Run it after changing production Auth settings or promoting a deployment.
