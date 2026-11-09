@@ -30,7 +30,7 @@ test("records first answer once and acknowledges both writes on completion", () 
     expect(events).toEqual([{
         event: "search_server", requestId, operation: "new", status: 200,
         outcome: "complete", firstTextMs: 25, durationMs: 55,
-        userSaved: true, assistantSaved: true, issues: [],
+        userSaved: true, assistantSaved: true, issues: [], stages: {},
     }]);
 });
 
@@ -62,4 +62,27 @@ test("rejects client payloads with unbounded values or private fields", () => {
     expect(searchClientEvent.safeParse({ ...event, query: "private" }).success).toBe(false);
     expect(searchClientEvent.safeParse({ ...event, durationMs: Infinity }).success).toBe(false);
     expect(searchClientEvent.safeParse({ ...event, firstTextMs: 100 }).success).toBe(false);
+});
+
+test("separates retrieval, model startup, and assistant write timings", () => {
+    const { trace, res, events, advance } = fixture("follow_up");
+    advance(50);
+    const finishRetrieval = trace.time("retrievalMs");
+    advance(100);
+    finishRetrieval();
+    advance(15);
+    trace.modelStarted();
+    advance(200);
+    trace.firstText();
+    advance(500);
+    trace.firstText();
+    const finishSave = trace.time("assistantSaveMs");
+    advance(25);
+    finishSave();
+    res.emit("finish");
+
+    expect(events).toEqual([expect.objectContaining({
+        firstTextMs: 365,
+        stages: { retrievalMs: 100, modelFirstTextMs: 200, assistantSaveMs: 25 },
+    })]);
 });

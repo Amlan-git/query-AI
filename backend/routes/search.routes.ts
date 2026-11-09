@@ -181,6 +181,7 @@ async function streamAnswerText(
 
         try {
             abortSignal.throwIfAborted();
+            trace.modelStarted();
             const result = input.kind === "prompt"
                 ? streamText({
                     model: google(modelName),
@@ -306,6 +307,7 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
         //step 3 - check if we have web search indexed for such a query
         //step 4 - web search to gather sources
         controller.signal.throwIfAborted();
+        const finishRetrieval = trace.time("retrievalMs");
         const searchPromise = performSearch(query);
 
         // Wrap the search call in Promise.race with an abort-aware promise to support early abortion
@@ -319,7 +321,7 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
                     reject(new DOMException("Aborted", "AbortError"));
                 });
             })
-        ]);
+        ]).finally(finishRetrieval);
 
         const webSearchResult = webSearchResponse.results;
         const parsedSources = formatSourcesForClient(webSearchResult);
@@ -354,6 +356,7 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
         // INLINE COMMENT: DB writes inside the stream are wrapped individually in their own try/catch blocks
         // so that if a database persistence operation fails (e.g. message logging fails), it does not disrupt
         // or abort the primary real-time search and response stream delivery to the client.
+        const finishSave = trace.time("assistantSaveMs");
         try {
             await prisma.message.create({
                 data: {
@@ -366,6 +369,8 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
             trace.saved("assistant");
         } catch {
             trace.degrade("assistant_save");
+        } finally {
+            finishSave();
         }
 
         try {
@@ -484,6 +489,7 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
 
         // Step 6: Tavily search
         controller.signal.throwIfAborted();
+        const finishRetrieval = trace.time("retrievalMs");
         const searchPromise = performSearch(query);
 
         // Wrap the search call in Promise.race with an abort-aware promise to support early abortion
@@ -497,7 +503,7 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
                     reject(new DOMException("Aborted", "AbortError"));
                 });
             })
-        ]);
+        ]).finally(finishRetrieval);
 
         const webSearchResult = webSearchResponse.results;
         const parsedSources = formatSourcesForClient(webSearchResult);
@@ -531,6 +537,7 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
         }, res, controller.signal, trace);
 
         // Step 9: Save ASSISTANT message + SOURCES block + res.end()
+        const finishSave = trace.time("assistantSaveMs");
         try {
             await prisma.message.create({
                 data: {
@@ -543,6 +550,8 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
             trace.saved("assistant");
         } catch {
             trace.degrade("assistant_save");
+        } finally {
+            finishSave();
         }
 
         try {

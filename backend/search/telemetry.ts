@@ -31,6 +31,8 @@ export function trackSearch(
     const candidate = requestIdSchema.safeParse(req.get("x-search-request-id"));
     const requestId = candidate.success ? candidate.data : randomUUID();
     const issues = new Set<Stage>();
+    const stages: Partial<Record<"retrievalMs" | "modelFirstTextMs" | "assistantSaveMs", number>> = {};
+    let modelStartedAt: number | undefined;
     let firstTextMs: number | null = null;
     let userSaved = false;
     let assistantSaved = false;
@@ -52,7 +54,7 @@ export function trackSearch(
         emit({
             event: "search_server", requestId, operation, status, outcome,
             firstTextMs, durationMs: Math.round(now() - started),
-            userSaved, assistantSaved, issues: [...issues],
+            userSaved, assistantSaved, issues: [...issues], stages,
         });
     }
 
@@ -61,7 +63,17 @@ export function trackSearch(
 
     return {
         requestId,
-        firstText() { firstTextMs ??= Math.round(now() - started); },
+        time(stage: "retrievalMs" | "assistantSaveMs") {
+            const start = now();
+            return () => { stages[stage] = Math.round(now() - start); };
+        },
+        modelStarted() { modelStartedAt ??= now(); },
+        firstText() {
+            if (firstTextMs !== null) return;
+            const first = now();
+            firstTextMs = Math.round(first - started);
+            if (modelStartedAt !== undefined) stages.modelFirstTextMs = Math.round(first - modelStartedAt);
+        },
         saved(role: "user" | "assistant") {
             if (role === "user") userSaved = true;
             else assistantSaved = true;

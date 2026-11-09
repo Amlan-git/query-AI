@@ -1,3 +1,5 @@
+const stageNames = ["retrievalMs", "modelFirstTextMs", "assistantSaveMs"] as const;
+
 type Event = {
   event: "search_client" | "search_server";
   requestId: string;
@@ -8,6 +10,7 @@ type Event = {
   userSaved?: boolean;
   assistantSaved?: boolean;
   issues?: string[];
+  stages?: Partial<Record<typeof stageNames[number], number>>;
 };
 
 function decode(value: unknown): Event | null {
@@ -56,11 +59,18 @@ const report = Object.fromEntries([...groups].map(([group, events]) => {
   const issues: Record<string, number> = Object.create(null);
   const firstText: number[] = [];
   const duration: number[] = [];
+  const stages = { retrievalMs: [] as number[], modelFirstTextMs: [] as number[], assistantSaveMs: [] as number[] };
   let savedTurns = 0;
   for (const event of events.values()) {
     outcomes[event.outcome]++;
     if (event.outcome === "complete") {
       duration.push(event.durationMs);
+      for (const stage of stageNames) {
+        const timing = event.stages?.[stage];
+        if (typeof timing === "number" && Number.isFinite(timing) && timing >= 0) {
+          stages[stage].push(timing);
+        }
+      }
       if (event.firstTextMs !== null) firstText.push(event.firstTextMs);
     }
     if (event.userSaved && event.assistantSaved) savedTurns++;
@@ -74,7 +84,7 @@ const report = Object.fromEntries([...groups].map(([group, events]) => {
     completionRate: attempted ? outcomes.complete / attempted : null,
     firstTextMs: percentiles(firstText),
     completionMs: percentiles(duration),
-    ...(group.startsWith("search_server.") ? { savedTurns, issues } : {}),
+    ...(group.startsWith("search_server.") ? { savedTurns, issues, stages: Object.fromEntries(stageNames.map(stage => [stage, percentiles(stages[stage])])) } : {}),
   }];
 }));
 

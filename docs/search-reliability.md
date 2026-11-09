@@ -44,3 +44,8 @@ completion rate excluding cancellations and rejections, p50/p95 for completed
 requests, acknowledged message writes, and issue counts by server stage. Treat
 small samples as a smoke test. A meaningful baseline needs enough real requests
 and a window within the project's log retention. The CLI limit caps the sample.
+
+Server summaries include retrieval duration, time from the first model attempt
+to the first model text (including any retries), and the assistant write
+duration. Percentiles use completed requests with the relevant timing field,
+so older logs and stages without a measurement do not add zeroes.
