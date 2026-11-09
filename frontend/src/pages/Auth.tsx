@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { supabase } from "@/lib/supabase";
+import { rememberConversationReturn } from "@/lib/conversation-return";
 import { Button } from "@/components/ui/button";
 import { ShieldCheck } from "lucide-react";
 
@@ -26,6 +27,7 @@ export default function Auth() {
 
   async function login(provider: "github" | "google") {
     setLoading(true);
+    rememberConversationReturn(searchParams.get("returnTo"));
     const callbackUrl = new URL(`${window.location.origin}/auth/callback`);
     if (prompt) {
       callbackUrl.searchParams.set("prompt", prompt);

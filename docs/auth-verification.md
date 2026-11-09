@@ -28,3 +28,8 @@ To run from GitHub, add `SUPABASE_ACCESS_TOKEN` under the repository's
 **Settings → Secrets and variables → Actions**. Once the workflow is on
 the default branch, open **Actions → Production auth check → Run workflow**.
 Run it after changing production Auth settings or promoting a deployment.
+
+For a browser check after deployment, open a legacy conversation link in a
+signed-out browser and sign in as the owner in the same tab. Confirm the
+canonical conversation URL and its messages load. Repeat with an account that
+doesn't own the conversation and confirm its messages remain inaccessible.

@@ -3,6 +3,8 @@ import { Navigate, useLocation } from "react-router";
 import { supabase } from "@/lib/supabase";
 import { checkProtectedAccess, type AccessState } from "@/lib/auth-flow";
 
+import { validConversationReturn } from "@/lib/conversation-return";
+
 export default function ProtectedRoute({ 
     children 
 }: { 
@@ -48,6 +50,11 @@ export default function ProtectedRoute({
     }
 
     if (access.status === "signed-out") {
+        const destination = validConversationReturn(location.pathname + location.search);
+        if (destination) {
+            const params = new URLSearchParams({ returnTo: destination });
+            return <Navigate to={`/auth?${params}`} replace />;
+        }
         return <Navigate to={`/auth${location.search}`} replace />;
     }
 
