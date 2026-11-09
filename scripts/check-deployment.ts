@@ -1,3 +1,5 @@
+import { assertOAuthRedirectConfig } from "./oauth-redirect";
+
 const target = Bun.argv[2];
 if (!target) {
   console.error("Usage: bun scripts/check-deployment.ts https://your-deployment.vercel.app");
@@ -9,6 +11,8 @@ if (origin.protocol !== "https:" || origin.username || origin.password) {
   console.error("Use an HTTPS deployment URL without credentials.");
   process.exit(2);
 }
+
+const isProduction = origin.origin === "https://query-ai-search.vercel.app";
 
 async function request(path: string, init: RequestInit = {}) {
   const response = await fetch(new URL(path, origin), {
@@ -56,6 +60,24 @@ await Promise.all([
       }), 401);
     }),
   ),
+  ...(isProduction ? [check("production Supabase OAuth redirects", async () => {
+    const token = process.env.SUPABASE_ACCESS_TOKEN;
+    if (!token) throw new Error("set SUPABASE_ACCESS_TOKEN with Auth config read access");
+
+    const publicConfig = await request("/env.json");
+    assertResponse(publicConfig, 200);
+    const supabaseUrl = new URL(publicConfig.json.VITE_SUPABASE_URL);
+    const project = /^([a-z0-9]{20})\.supabase\.co$/.exec(supabaseUrl.hostname)?.[1];
+    if (!project) throw new Error("cannot determine the Supabase project from /env.json");
+
+    const config = await fetch(`https://api.supabase.com/v1/projects/${project}/config/auth`, {
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!config.ok) throw new Error(`Supabase Management API returned HTTP ${config.status}`);
+    assertOAuthRedirectConfig(await config.json(), origin);
+  })] : []),
   check("public Supabase configuration and OAuth providers", async () => {
     const response = await request("/env.json");
     assertResponse(response, 200);
