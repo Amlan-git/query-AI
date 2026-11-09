@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "bun install",
   "buildCommand": "bun run build:frontend",
   "outputDirectory": "frontend/dist",
   "functions": {
@@ -41,7 +42,11 @@
       "destination": "/api/health"
     },
     {
-      "source": "/(.*)",
+      "source": "/(auth|auth/callback|search|dashboard)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/search/:conversationId",
       "destination": "/index.html"
     }
   ]

@@ -2,12 +2,13 @@ import express from "express";
 import {
   applyGlobalMiddleware,
   verifyToken,
+  ensureAppUser,
   rateLimiter,
   errorHandler
-} from "./middleware";
-import authRouter from "./routes/auth.routes";
-import searchRouter from "./routes/search.routes";
-import conversationRouter from "./routes/conversation.routes";
+} from "./middleware.js";
+import authRouter from "./routes/auth.routes.js";
+import searchRouter from "./routes/search.routes.js";
+import conversationRouter from "./routes/conversation.routes.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -20,11 +21,24 @@ applyGlobalMiddleware(app);
 app.use(rateLimiter);
 
 app.get("/health", (_req, res) => {
-    res.status(200).json({ ok: true });
+    res.status(200).json({
+        ok: true,
+        env: {
+            database: Boolean(process.env.DATABASE_URL),
+            supabaseUrl: Boolean(process.env.SUPABASE_URL),
+            supabaseSecret: Boolean(process.env.SUPABASE_SECRET_KEY),
+            tavily: Boolean(process.env.TAVILY_API_KEY),
+            googleGenerativeAi: Boolean(process.env.GOOGLE_GENERATIVE_AI_API_KEY),
+            frontendUrl: Boolean(process.env.FRONTEND_URL)
+        }
+    });
 });
 
-// Apply global JWT verification
+// Apply global JWT verification, then on-demand user provisioning.
+// ensureAppUser caches per warm container so it does the upsert only once
+// per user, not once per request — that's what makes it safe on serverless.
 app.use(verifyToken);
+app.use(ensureAppUser);
 
 // Mount logical routes
 app.use("/", authRouter);

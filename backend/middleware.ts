@@ -4,10 +4,9 @@ import helmet from "helmet";
 import cors from "cors";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import type { User } from "@supabase/supabase-js";
-import { createSupabaseClient } from "./client";
-
-// Initialize Supabase Client for JWT verification
-const client = createSupabaseClient();
+import { verifyAccessToken } from "./auth.js";
+import { prisma } from "./db.js";
+import { AuthProvider } from "./prisma/generated/enums.js";
 
 // Extend the Express Request type to include the user property typed properly
 declare global {
@@ -26,9 +25,6 @@ declare global {
 export async function verifyToken(req: Request, res: Response, next: NextFunction) {
   // Define public routes exclusion list (method and path pairings)
   const publicRoutes = [
-    { method: "POST", path: "/api/auth/login" },
-    { method: "POST", path: "/api/auth/logout" },
-    { method: "GET", path: "/api/auth/callback" },
     { method: "GET", path: "/health" },
     { method: "POST", path: "/signup" },
     { method: "POST", path: "/signin" }
@@ -63,25 +59,13 @@ export async function verifyToken(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 
-  try {
-    // Validate the JWT against Supabase's auth service directly (no manual secret verification)
-    const { data, error } = await client.auth.getUser(token);
-
-    if (error || !data || !data.user) {
-      console.warn(
-        `[auth-fail] ${req.method} ${req.path} | reason: ${error?.message || "User not found"} | ip: ${ip}`
-      );
-      return res.status(401).json({ error: "Invalid or expired token" });
-    }
-
-    // Attach user object securely to request context
-    req.user = data.user;
-    return next();
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[auth-fail] ${req.method} ${req.path} | reason: Internal auth error (${errorMsg}) | ip: ${ip}`);
-    return res.status(401).json({ error: "Invalid or expired token" });
+  const verification = await verifyAccessToken(token);
+  if (!verification.user) {
+    console.warn(`[auth-fail] ${req.method} ${req.path} | status: ${verification.status} | ip: ${ip}`);
+    return res.status(verification.status).json({ error: verification.error });
   }
+  req.user = verification.user;
+  return next();
 }
 
 /**
@@ -97,6 +81,65 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
   return next();
+}
+
+function getUserProfile(user: User) {
+  const rawProvider = user.app_metadata?.provider;
+  const provider = rawProvider === "github" ? AuthProvider.GITHUB : AuthProvider.GOOGLE;
+  const name =
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email ||
+    "User";
+
+  return { name, provider };
+}
+
+/**
+ * Per-warm-container cache of user IDs already provisioned in the local DB.
+ * Each cold-started function does the upsert exactly once per user, not once
+ * per request — that's the difference between sustainable serverless and
+ * exhausting Supabase's direct-connection cap on the first burst of traffic.
+ */
+const provisionedUsers = new Set<string>();
+
+export async function ensureAppUser(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return next();
+  }
+
+  if (provisionedUsers.has(req.user.id)) {
+    return next();
+  }
+
+  if (!req.user.email) {
+    console.warn(`[user-sync] Missing email for authenticated user: ${req.user.id}`);
+    return res.status(400).json({ error: "Authenticated user is missing an email address" });
+  }
+
+  const { name, provider } = getUserProfile(req.user);
+
+  try {
+    await prisma.user.upsert({
+      where: { id: req.user.id },
+      update: {
+        email: req.user.email,
+        name,
+        provider
+      },
+      create: {
+        id: req.user.id,
+        email: req.user.email,
+        name,
+        provider
+      }
+    });
+    provisionedUsers.add(req.user.id);
+    return next();
+  } catch (err: unknown) {
+    console.error("[user-sync] Failed to sync authenticated user:", err);
+    return res.status(500).json({ error: "Failed to initialize user profile" });
+  }
 }
 
 /**
