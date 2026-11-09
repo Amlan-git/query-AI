@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router";
 import { supabase } from "@/lib/supabase";
 import { resolveOAuthSession } from "@/lib/auth-flow";
+import { pendingConversationReturn, rememberConversationReturn } from "@/lib/conversation-return";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,9 +50,10 @@ export default function AuthCallback() {
         );
       }
 
-      // Navigate to the main app
+      const destination = pendingConversationReturn();
+      rememberConversationReturn(null);
       const prompt = new URLSearchParams(window.location.search).get("prompt");
-      navigate(prompt ? `/search?prompt=${encodeURIComponent(prompt)}` : "/search", { replace: true });
+      navigate(destination ?? (prompt ? `/search?prompt=${encodeURIComponent(prompt)}` : "/search"), { replace: true });
     }
 
     async function handleCallback() {
@@ -79,6 +81,8 @@ export default function AuthCallback() {
   }, [navigate]);
 
   if (status === "error") {
+    const destination = pendingConversationReturn();
+    const retryPath = destination ? `/auth?${new URLSearchParams({ returnTo: destination })}` : "/auth";
     return (
       <div className="flex min-h-[80vh] items-center justify-center p-6 relative z-10">
         <Card className="w-full max-w-md bg-gradient-to-b from-card/85 to-card border border-destructive/20 shadow-xl backdrop-blur-md">
@@ -94,7 +98,7 @@ export default function AuthCallback() {
             </CardDescription>
           </CardHeader>
           <CardFooter className="justify-center pb-8">
-            <Button onClick={() => navigate("/auth")} className="px-6 py-5 cursor-pointer">
+            <Button onClick={() => navigate(retryPath)} className="px-6 py-5 cursor-pointer">
               Try Again
             </Button>
           </CardFooter>

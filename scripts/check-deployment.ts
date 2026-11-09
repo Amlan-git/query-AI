@@ -40,7 +40,29 @@ function assertResponse(result: Awaited<ReturnType<typeof request>>, status: num
   }
 }
 
+const legacyOrigin = "https://queryaisearch.vercel.app";
+const conversationProbe = "/search/00000000-0000-4000-8000-000000000000?probe=1";
+const legacyProbes = [
+  ["homepage", "/", "/", "GET"],
+  ["conversation link", conversationProbe, conversationProbe, "GET"],
+  ["stale OAuth callback", "/auth/callback?code=synthetic", "/auth", "GET"],
+  ["stale OAuth fallback", "/?code=synthetic", "/auth", "GET"],
+  ["sign-in POST", "/signin", null, "POST"],
+] as const;
+
 await Promise.all([
+  ...(isProduction ? legacyProbes.map(([name, path, destination, method]) =>
+    check(`legacy hostname ${name}`, async () => {
+      const response = await fetch(new URL(path, legacyOrigin), {
+        method, redirect: "manual", signal: AbortSignal.timeout(10_000),
+      });
+      const expectedStatus = destination === null ? 405 : 307;
+      const expectedLocation = destination === null ? null : new URL(destination, origin).href;
+      if (response.status !== expectedStatus || response.headers.get("location") !== expectedLocation) {
+        throw new Error(`expected HTTP ${expectedStatus} and matching Location, received HTTP ${response.status}`);
+      }
+    }),
+  ) : []),
   check("/health", async () => {
     const response = await request("/health");
     assertResponse(response, 200);
