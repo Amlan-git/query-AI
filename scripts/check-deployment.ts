@@ -74,7 +74,7 @@ await Promise.all([
   check("/conversations rejects anonymous requests", async () => {
     assertResponse(await request("/conversations"), 401);
   }),
-  ...["/signin", "/signup", "/query_ask", "/query_ask/follow_up"].map(path =>
+  ...["/signin", "/signup", "/query_ask", "/query_ask/follow_up", "/query_ask/telemetry"].map(path =>
     check(`${path} rejects anonymous requests`, async () => {
       assertResponse(await request(path, {
         method: "POST", headers: { "Content-Type": "application/json" },

@@ -175,6 +175,11 @@ export const searchLimiter = rateLimit({
  * Logs all completed requests upon response finish.
  */
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
+  // The telemetry collector logs only its validated measurement fields.
+  if (req.path === "/query_ask/telemetry") {
+    next();
+    return;
+  }
   res.on("finish", () => {
     const userId = req.user ? req.user.id : "guest";
     const ip = req.ip || req.socket.remoteAddress || "unknown";

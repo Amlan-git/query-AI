@@ -8,6 +8,7 @@ import { PROMPT_TEMPLATE, SYSTEM_PROMPT } from "../prompts.js";
 import { searchLimiter } from "../middleware.js";
 import { performSearch, type SearchResult } from "../search/search.service.js";
 import type { ModelMessage } from "ai";
+import { logSearchEvent, searchClientEvent, trackSearch } from "../search/telemetry.js";
 
 // Request body validation schema for the /query_ask endpoint.
 // Restricting to 500 characters prevents oversized payload attacks, reduces token usage,
@@ -43,9 +44,15 @@ const ANSWER_MODEL_CANDIDATES = [
 
 const router = Router();
 
-function createRequestId() {
-    return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
+router.post("/query_ask/telemetry", (req, res) => {
+    const event = searchClientEvent.safeParse(req.body);
+    if (!event.success) {
+        res.status(400).json({ error: "Invalid telemetry event" });
+        return;
+    }
+    logSearchEvent({ event: "search_client", ...event.data });
+    res.status(204).end();
+});
 
 function getPublicSearchError(err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -133,6 +140,7 @@ async function generateFollowUps(query: string, answer: string, sources: SearchR
     const result = await streamText({
         model: google(ANSWER_MODEL_CANDIDATES[0] || "gemini-2.5-flash"),
         abortSignal,
+        onError: () => {},
         system: "You generate concise related questions for a search answer. Return only valid JSON.",
         prompt: [
             "Generate exactly 3 follow-up questions the user might ask next.",
@@ -164,48 +172,49 @@ type AnswerStreamInput =
 async function streamAnswerText(
     input: AnswerStreamInput,
     res: Response,
-    abortSignal: AbortSignal
+    abortSignal: AbortSignal,
+    trace: ReturnType<typeof trackSearch>,
 ) {
-    const errors: unknown[] = [];
 
     for (const modelName of ANSWER_MODEL_CANDIDATES) {
         let fullResponse = "";
 
         try {
-            console.log(`[llm] Starting answer stream with ${modelName}`);
+            abortSignal.throwIfAborted();
             const result = input.kind === "prompt"
                 ? streamText({
                     model: google(modelName),
                     system: SYSTEM_PROMPT,
                     abortSignal,
+                    onError: () => {},
                     prompt: input.prompt
                 })
                 : streamText({
                     model: google(modelName),
                     system: SYSTEM_PROMPT,
                     abortSignal,
+                    onError: () => {},
                     messages: input.messages
                 });
 
             for await (const textPart of result.textStream) {
+                if (textPart.trim()) trace.firstText();
                 fullResponse += textPart;
                 res.write(textPart);
             }
 
             if (fullResponse.trim().length > 0) {
-                console.log(`[llm] Answer stream completed with ${modelName}`);
                 return fullResponse;
             }
 
-            errors.push(new Error(`${modelName} returned an empty answer stream`));
-            console.warn(`[llm] ${modelName} returned an empty answer stream; trying fallback model`);
-        } catch (err: unknown) {
-            errors.push(err);
-            const message = err instanceof Error ? err.message : String(err);
-            console.error(`[llm] ${modelName} failed while streaming answer:`, message);
+        } catch {
+            abortSignal.throwIfAborted();
+            // A partial attempt has already reached the browser.
+            if (fullResponse.trim()) trace.degrade("generation");
         }
     }
 
+    trace.degrade("generation");
     const fallbackAnswer = [
         "I found relevant sources and images, but the answer model is temporarily unavailable.",
         "",
@@ -216,11 +225,11 @@ async function streamAnswerText(
     ].join("\n");
 
     res.write(fallbackAnswer);
-    console.error("[llm] All answer models failed:", errors);
     return fallbackAnswer;
 }
 
 router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => {
+    const trace = trackSearch(req, res, "new");
     // Validate request body at the network boundary before allocating resources
     const parseResult = QueryAskSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -239,7 +248,6 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
     res.on("close", () => {
         if (!res.writableEnded) {
             controller.abort();
-            console.log("[query_ask] Client disconnected — stream aborted");
         }
     });
 
@@ -270,12 +278,13 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
             });
             conversationId = newConversation.id;
         }
-    } catch (dbErr: unknown) {
-        console.error("[query_ask] Failed to resolve or create conversation:", dbErr);
-        res.status(500).json({ error: "Failed to initialize conversation" });
+    } catch {
+        trace.fail("initialize");
+        res.status(500).json({ error: "Failed to initialize conversation", requestId: trace.requestId });
         return;
     }
 
+    let stage: "retrieval" | "generation" = "retrieval";
     try {
         // INLINE COMMENT: DB writes inside the stream are wrapped individually in their own try/catch blocks
         // so that if a database persistence operation fails (e.g. message logging fails), it does not disrupt
@@ -288,14 +297,15 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
                     content: parseResult.data.query
                 }
             });
-            console.log(`[query_ask] User message saved (conversationId: ${conversationId})`);
-        } catch (dbErr: unknown) {
-            console.error("[query_ask] DB write failed (non-fatal):", dbErr);
+            trace.saved("user");
+        } catch {
+            trace.degrade("user_save");
         }
 
         //step 2 - make sure the user has access/credits left
         //step 3 - check if we have web search indexed for such a query
         //step 4 - web search to gather sources
+        controller.signal.throwIfAborted();
         const searchPromise = performSearch(query);
 
         // Wrap the search call in Promise.race with an abort-aware promise to support early abortion
@@ -338,7 +348,8 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
         res.write(`<SOURCES>${JSON.stringify(parsedSources)}</SOURCES>\n`);
         res.write(`<IMAGES>${JSON.stringify(parsedImages)}</IMAGES>\n`);
 
-        const fullResponse = await streamAnswerText({ kind: "prompt", prompt }, res, controller.signal);
+        stage = "generation";
+        const fullResponse = await streamAnswerText({ kind: "prompt", prompt }, res, controller.signal, trace);
 
         // INLINE COMMENT: DB writes inside the stream are wrapped individually in their own try/catch blocks
         // so that if a database persistence operation fails (e.g. message logging fails), it does not disrupt
@@ -352,16 +363,16 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
                     sources: parsedSources
                 }
             });
-            console.log(`[query_ask] Assistant message saved (conversationId: ${conversationId})`);
-        } catch (dbErr: unknown) {
-            console.error("[query_ask] DB write failed (non-fatal):", dbErr);
+            trace.saved("assistant");
+        } catch {
+            trace.degrade("assistant_save");
         }
 
         try {
             const followUps = await generateFollowUps(query, fullResponse, webSearchResult, controller.signal);
             res.write(`\n<FOLLOW_UPS>${JSON.stringify(followUps)}</FOLLOW_UPS>\n`);
-        } catch (followUpErr: unknown) {
-            console.error("[query_ask] Follow-up generation failed (non-fatal):", followUpErr);
+        } catch {
+            trace.degrade("suggestions");
             res.write(`\n<FOLLOW_UPS>${JSON.stringify(fallbackFollowUps(query, webSearchResult))}</FOLLOW_UPS>\n`);
         }
 
@@ -369,18 +380,16 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
         res.end();
     } catch (err: unknown) {
         // AbortError is a client disconnect event (expected behavior), NOT an application failure
-        if (err instanceof Error && err.name === "AbortError") {
-            console.log("[query_ask] Stream aborted by client disconnect");
+        if (controller.signal.aborted) {
             if (!res.headersSent) {
                 res.end();
             }
             return;
         }
 
-        // Log actual application failures with the requested prefix [query_ask-error]
-        const requestId = createRequestId();
+        trace.fail(stage);
+        const { requestId } = trace;
         const publicError = getPublicSearchError(err);
-        console.error(`[query_ask-error] Search/Stream failure (${requestId}):`, err);
 
         // If headers have not been sent yet, we can safely respond with a standard 500 JSON error
         if (!res.headersSent) {
@@ -397,6 +406,7 @@ router.post("/query_ask", searchLimiter, async (req: Request, res: Response) => 
 });
 
 router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Response) => {
+    const trace = trackSearch(req, res, "follow_up");
     // Step 1: Validate request body
     const parseResult = FollowUpSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -414,7 +424,6 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
     res.on("close", () => {
         if (!res.writableEnded) {
             controller.abort();
-            console.log("[follow_up] Client disconnected — stream aborted");
         }
     });
 
@@ -451,12 +460,13 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
                 content: true
             }
         });
-    } catch (dbErr: unknown) {
-        console.error("[follow_up] Failed to load conversation or history:", dbErr);
-        res.status(500).json({ error: "Failed to initialize conversation history" });
+    } catch {
+        trace.fail("initialize");
+        res.status(500).json({ error: "Failed to initialize conversation history", requestId: trace.requestId });
         return;
     }
 
+    let stage: "retrieval" | "generation" = "retrieval";
     try {
         // Step 5: Save the USER message (non-fatal)
         try {
@@ -467,12 +477,13 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
                     content: query
                 }
             });
-            console.log(`[follow_up] User message saved (conversationId: ${conversationId})`);
-        } catch (dbErr: unknown) {
-            console.error("[follow_up] DB write failed (non-fatal):", dbErr);
+            trace.saved("user");
+        } catch {
+            trace.degrade("user_save");
         }
 
         // Step 6: Tavily search
+        controller.signal.throwIfAborted();
         const searchPromise = performSearch(query);
 
         // Wrap the search call in Promise.race with an abort-aware promise to support early abortion
@@ -510,13 +521,14 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
         res.write(`<SOURCES>${JSON.stringify(parsedSources)}</SOURCES>\n`);
         res.write(`<IMAGES>${JSON.stringify(parsedImages)}</IMAGES>\n`);
 
+        stage = "generation";
         const fullResponse = await streamAnswerText({
             kind: "messages",
             messages: [
                 ...historyMessages,
                 { role: "user", content: newUserMessage }
             ]
-        }, res, controller.signal);
+        }, res, controller.signal, trace);
 
         // Step 9: Save ASSISTANT message + SOURCES block + res.end()
         try {
@@ -528,33 +540,32 @@ router.post('/query_ask/follow_up', searchLimiter, async (req: Request, res: Res
                     sources: parsedSources
                 }
             });
-            console.log(`[follow_up] Assistant message saved (conversationId: ${conversationId})`);
-        } catch (dbErr: unknown) {
-            console.error("[follow_up] DB write failed (non-fatal):", dbErr);
+            trace.saved("assistant");
+        } catch {
+            trace.degrade("assistant_save");
         }
 
         try {
             const followUps = await generateFollowUps(query, fullResponse, webSearchResult, controller.signal);
             res.write(`\n<FOLLOW_UPS>${JSON.stringify(followUps)}</FOLLOW_UPS>\n`);
-        } catch (followUpErr: unknown) {
-            console.error("[follow_up] Follow-up generation failed (non-fatal):", followUpErr);
+        } catch {
+            trace.degrade("suggestions");
             res.write(`\n<FOLLOW_UPS>${JSON.stringify(fallbackFollowUps(query, webSearchResult))}</FOLLOW_UPS>\n`);
         }
 
         res.end();
     } catch (err: unknown) {
         // Step 10: catch block
-        if (err instanceof Error && err.name === "AbortError") {
-            console.log("[follow_up] Stream aborted by client disconnect");
+        if (controller.signal.aborted) {
             if (!res.headersSent) {
                 res.end();
             }
             return;
         }
 
-        const requestId = createRequestId();
+        trace.fail(stage);
+        const { requestId } = trace;
         const publicError = getPublicSearchError(err);
-        console.error(`[follow_up-error] Search/Stream failure (${requestId}):`, err);
 
         if (!res.headersSent) {
             res.status(500).json({ error: publicError, requestId });
