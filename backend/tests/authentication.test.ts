@@ -11,9 +11,24 @@ mock.module("../client", () => ({
     return result;
   } } }),
 }));
-mock.module("../db", () => ({ prisma: {} }));
+const conversation = { id: "private-conversation", userId: "owner", title: "Private" };
+const findConversation = mock(async () => conversation);
+const loadConversation = mock(async () => ({ ...conversation, messages: [] }));
+const updateConversation = mock(async () => ({ ...conversation, title: "Renamed" }));
+const deleteConversation = mock(async () => conversation);
+mock.module("../db", () => ({
+  prisma: {
+    conversation: {
+      findUnique: findConversation,
+      findFirst: loadConversation,
+      update: updateConversation,
+      delete: deleteConversation,
+    },
+  },
+}));
 const { verifyToken } = await import("../middleware");
 const { default: authRouter } = await import("../routes/auth.routes");
+const { default: conversationRouter } = await import("../routes/conversation.routes");
 
 beforeEach(() => {
   thrown = undefined;
@@ -34,6 +49,43 @@ async function verify() {
   } as Response;
   await verifyToken(req, res, (() => { continued = true; }) as NextFunction);
   return { status, body, continued, user: req.user };
+}
+
+for (const [method, operation, successStatus] of [
+  ["get", loadConversation, 200],
+  ["patch", updateConversation, 200],
+  ["delete", deleteConversation, 204],
+] as const) {
+  async function accessConversation(userId: string) {
+    let status = 200;
+    const req = {
+      user: { id: userId },
+      params: { conversationId: conversation.id },
+      body: { title: "Renamed" },
+    } as unknown as Request;
+    const res = {
+      status(code: number) { status = code; return this; },
+      json() { return this; },
+      send() { return this; },
+    } as unknown as Response;
+    const layer = conversationRouter.stack.find(
+      layer => layer.route?.path === "/:conversationId" && layer.route.stack[0]?.method === method
+    );
+    await layer!.route!.stack[0]!.handle(req, res, () => {});
+    return status;
+  }
+
+  test(`${method.toUpperCase()} cannot access another user's conversation`, async () => {
+    operation.mockClear();
+    expect(await accessConversation("other-user")).toBe(403);
+    expect(operation).not.toHaveBeenCalled();
+  });
+
+  test(`${method.toUpperCase()} allows the owner to access the conversation`, async () => {
+    operation.mockClear();
+    expect(await accessConversation("owner")).toBe(successStatus);
+    expect(operation).toHaveBeenCalledTimes(1);
+  });
 }
 
 test("auth provider network outage returns 503 instead of invalidating the user's token", async () => {
